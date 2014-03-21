@@ -1,3 +1,6 @@
+# Target files
+mqtt2can
+
 # Object files
 *.o
 *.ko
