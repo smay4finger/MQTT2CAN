@@ -29,17 +29,22 @@
 #include <sys/socket.h>
 #include <mosquitto.h>
 
-int main(int argc, char** argv)
+int debug = 0;
+
+char* can_interface = NULL;
+char* broker_hostname = "localhost";
+int broker_port = 1883;
+
+char* mqtt_topic_prefix = NULL;
+int mqtt_qos = 0;
+bool mqtt_retain = false;
+
+int can_fd;
+
+void parse_options(int argc, char** argv)
 {
-
     int opt;
-    char* can_interface = NULL;
-    char* broker_hostname = "localhost";
-    int broker_port = 1883;
-
-    char* mqtt_topic_prefix = NULL;
-
-    while ( (opt = getopt(argc, argv, "i:h:p:t:")) != -1 ) {
+    while ( (opt = getopt(argc, argv, "i:h:p:t:q:rd")) != -1 ) {
         switch ( opt ) {
         case 'i':
             can_interface = optarg;
@@ -53,8 +58,26 @@ int main(int argc, char** argv)
         case 't':
             mqtt_topic_prefix = optarg;
             break;
+        case 'q':
+            mqtt_qos = atoi(optarg);
+            if ( mqtt_qos < 0 || mqtt_qos > 2 ) {
+                fprintf(stderr, "MQTT QoS must be between 0 and 2\n");
+                exit(EXIT_FAILURE);
+            }
+            break;
+        case 'r':
+            mqtt_retain = true;
+            break;
+        case 'd':
+            debug++;
+            break;
         default:
-            fprintf(stderr, "%s -i [CAN interface] [-h [hostname]] [-p [port]] [-t [topic]]\n", argv[0]);
+            fprintf(stderr, 
+                "%s -i [CAN interface] [-h [hostname]] [-p [port]] [-t [topic]]\n"
+                "  -q [QoS]     the QoS of the MQTT messages\n"
+                "  -r           published MQTT messages will be retained by the broker\n"
+                "  -d           debug (use multiple times for more debug messages)\n"
+                , argv[0]);
             exit(EXIT_FAILURE);
         }
     }
@@ -77,16 +100,112 @@ int main(int argc, char** argv)
         strcat(mqtt_topic_prefix, can_interface);
     }
 
-#if 0
-    printf("CAN interface %s\n", can_interface);
-    printf("using broker at %s:%d\n", broker_hostname, broker_port);
-    printf("MQTT topic is %s\n", mqtt_topic_prefix);
-#endif
+    if ( debug > 2 ) {
+        printf("CAN interface %s\n", can_interface);
+        printf("using broker at %s:%d\n", broker_hostname, broker_port);
+        printf("MQTT topic is %s\n", mqtt_topic_prefix);
+    }
+}
 
+
+void mqtt_log_callback(struct mosquitto* mosq, void* userdata, int level, const char* str)
+{
+mosq = mosq; /* unused */
+userdata = userdata; /* unused */
+level = level; /* unused */
+
+    if ( debug > 1 ) {
+        printf("mosquitto: %s\n", str);
+    }
+}
+
+void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *message)
+{
+mosq = mosq; /* unused */
+userdata = userdata; /* unused */
+message = message; /* unused */
+
+    if ( message->payloadlen ) {
+        struct can_frame frame;
+
+        char* saveptr;
+        char* token;
+        token = strtok_r(message->topic, "/", &saveptr);
+        while ( token != NULL ) {
+            if ( strcmp(token, "tx") == 0 ) {
+                char* id_token = strtok_r(NULL, "/", &saveptr);
+                if ( id_token == NULL ) {
+                    printf("malformed message topic\n");
+                    return;
+                }
+                frame.can_id = strtol(id_token, NULL, 16);
+                break;
+            }
+            token = strtok_r(NULL, "/", &saveptr);
+        }
+        if ( strcmp(token, "tx") != 0 ) {
+            printf("malformed message topic\n");
+            return;
+        }
+
+        int message_items = sscanf(message->payload, 
+            "%1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx", 
+                &frame.can_dlc, 
+                &frame.data[0],
+                &frame.data[1],
+                &frame.data[2],
+                &frame.data[3],
+                &frame.data[4],
+                &frame.data[5],
+                &frame.data[6],
+                &frame.data[7]);
+        if ( message_items != 9 ) {
+            printf("malformed message payload\n");
+            return;
+        }
+
+        printf("socketcan: TX ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
+            frame.can_id,
+            frame.can_dlc,
+            frame.data[0],
+            frame.data[1],
+            frame.data[2],
+            frame.data[3],
+            frame.data[4],
+            frame.data[5],
+            frame.data[6],
+            frame.data[7]);
+        if ( write(can_fd, &frame, sizeof(frame)) == -1 ) {
+            perror("write on CAN socket failed");
+            exit(EXIT_FAILURE);
+        }
+    }
+    else {
+        /* null message */
+    }
+}
+
+void mqtt_connect_callback(struct mosquitto *mosq, void *userdata, int result)
+{
+mosq = mosq; /* unused */
+userdata = userdata; /* unused */
+    if ( !result ) {
+        char topic[2048];
+        strncpy(topic, mqtt_topic_prefix, sizeof(topic));
+        strncat(topic, "/tx/+", sizeof(topic));
+        mosquitto_subscribe(mosq, NULL, topic, mqtt_qos);
+    }
+}
+
+
+int main(int argc, char** argv)
+{
+    parse_options(argc, argv);
+    
     /*
      * opening SocketCAN interface
      */
-    int can_fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+    can_fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if ( can_fd < 0 ) {
         perror("cannot create CAN socket");
         exit(EXIT_FAILURE);
@@ -117,11 +236,10 @@ int main(int argc, char** argv)
         perror("Mosquitto initialization failed");
         exit(EXIT_FAILURE);
     }
+    mosquitto_log_callback_set(mosq, mqtt_log_callback);
 
-#if 0
     mosquitto_connect_callback_set(mosq, mqtt_connect_callback);
     mosquitto_message_callback_set(mosq, mqtt_message_callback);
-#endif
 
     if ( mosquitto_connect_async(mosq, broker_hostname, broker_port, 20 /* keepalive */) ) {
         perror("Mosquitto connect failed");
@@ -153,6 +271,18 @@ int main(int argc, char** argv)
                 exit(EXIT_FAILURE);
             }
             
+            printf("socketcan: RX ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                frame.can_id,
+                frame.can_dlc,
+                frame.data[0],
+                frame.data[1],
+                frame.data[2],
+                frame.data[3],
+                frame.data[4],
+                frame.data[5],
+                frame.data[6],
+                frame.data[7]);
+
             char message[2048];
             snprintf(message, sizeof(message),
                 "%d %02x%02x%02x%02x%02x%02x%02x%02x",
@@ -162,14 +292,14 @@ int main(int argc, char** argv)
 
             char topic[2048];
             snprintf(topic, sizeof(topic),
-                "%s/%x",
+                "%s/rx/%x",
                     mqtt_topic_prefix,
                     frame.can_id);
 
             mosquitto_publish(mosq, NULL, topic,
                 strlen(message), message,
-                0 /* qos */,
-                false /* retain */);
+                mqtt_qos,
+                mqtt_retain);
         }
     }
 
