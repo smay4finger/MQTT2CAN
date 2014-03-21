@@ -110,12 +110,27 @@ void parse_options(int argc, char** argv)
 void debug_frame(struct can_frame* frame, char* direction)
 {
     if ( debug > 0 ) {
-        printf("socketcan: %s ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
-            direction,
-            frame->can_id,
-            frame->can_dlc,
-            frame->data[0], frame->data[1], frame->data[2], frame->data[3],
-            frame->data[4], frame->data[5], frame->data[6], frame->data[7]);
+        if ( !(frame->can_id & CAN_ERR_FLAG) ) {
+            if ( !(frame->can_id & CAN_RTR_FLAG) ) {
+                /* data frame */
+                printf("socketcan: %s ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                    direction,
+                    frame->can_id & CAN_ERR_MASK,
+                    frame->can_dlc,
+                    frame->data[0], frame->data[1], frame->data[2], frame->data[3],
+                    frame->data[4], frame->data[5], frame->data[6], frame->data[7]);
+            }
+            else {
+                /* remote request transmission frame */
+                printf("socketcan: %s ID=%X DLC=%d RTR\n",
+                    direction,
+                    frame->can_id & CAN_ERR_MASK,
+                    frame->can_dlc);
+            }
+        }
+        else {
+            /* error frame */
+        }
     }
 }
 
@@ -262,29 +277,44 @@ int main(int argc, char** argv)
 
         if ( FD_ISSET(can_fd, &rfds) ) {
             struct can_frame frame;
+            bzero(&frame, sizeof(frame));
             if ( read(can_fd, &frame, sizeof(struct can_frame)) == -1 ) {
                 perror("read on CAN socket failed");
                 exit(EXIT_FAILURE);
             }
             debug_frame(&frame, "RX");
 
-            char message[2048];
-            snprintf(message, sizeof(message),
-                "%d %02x%02x%02x%02x%02x%02x%02x%02x",
-                    frame.can_dlc,
-                    frame.data[0], frame.data[1], frame.data[2], frame.data[3],
-                    frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+            if ( frame.can_id & CAN_ERR_FLAG ) {
+                /* error frame */
+            }
+            else {
+                char topic[2048];
+                snprintf(topic, sizeof(topic),
+                    "%s/rx/%x",
+                        mqtt_topic_prefix,
+                        frame.can_id & CAN_ERR_MASK);
 
-            char topic[2048];
-            snprintf(topic, sizeof(topic),
-                "%s/rx/%x",
-                    mqtt_topic_prefix,
-                    frame.can_id);
+                char message[2048];
+                if ( !(frame.can_id & CAN_RTR_FLAG) ) {
+                    /* data frame */
+                    snprintf(message, sizeof(message),
+                        "%d %02x%02x%02x%02x%02x%02x%02x%02x",
+                            frame.can_dlc,
+                            frame.data[0], frame.data[1], frame.data[2], frame.data[3],
+                            frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+                }
+                else {
+                    /* remote transmission request frame */
+                    snprintf(message, sizeof(message),
+                        "%d RTR",
+                            frame.can_dlc);
+                }
 
-            mosquitto_publish(mosq, NULL, topic,
-                strlen(message), message,
-                mqtt_qos,
-                mqtt_retain);
+                mosquitto_publish(mosq, NULL, topic,
+                    strlen(message), message,
+                    mqtt_qos,
+                    mqtt_retain);
+            }
         }
     }
 
