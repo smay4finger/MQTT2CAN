@@ -39,12 +39,14 @@ char* mqtt_topic_prefix = NULL;
 int mqtt_qos = 0;
 bool mqtt_retain = false;
 
+bool bridge_mode = false;
+
 int can_fd;
 
 void parse_options(int argc, char** argv)
 {
     int opt;
-    while ( (opt = getopt(argc, argv, "i:h:p:t:q:rd")) != -1 ) {
+    while ( (opt = getopt(argc, argv, "i:h:p:t:q:rBd")) != -1 ) {
         switch ( opt ) {
         case 'i':
             can_interface = optarg;
@@ -68,6 +70,9 @@ void parse_options(int argc, char** argv)
         case 'r':
             mqtt_retain = true;
             break;
+        case 'B':
+            bridge_mode = true;
+            break;
         case 'd':
             debug++;
             break;
@@ -76,6 +81,7 @@ void parse_options(int argc, char** argv)
                 "%s -i [CAN interface] [-h [hostname]] [-p [port]] [-t [topic]]\n"
                 "  -q [QoS]     the QoS of the MQTT messages\n"
                 "  -r           published MQTT messages will be retained by the broker\n"
+                "  -B           bridge mode (MQTT topic must be set)\n"
                 "  -d           debug (use multiple times for more debug messages)\n"
                 , argv[0]);
             exit(EXIT_FAILURE);
@@ -84,6 +90,11 @@ void parse_options(int argc, char** argv)
 
     if ( can_interface == NULL ) {
         fprintf(stderr, "please specify CAN interface\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if ( bridge_mode && mqtt_topic_prefix == NULL ) {
+        fprintf(stderr, "in bridge mode the MQTT topic is mandatory\n");
         exit(EXIT_FAILURE);
     }
 
@@ -159,7 +170,7 @@ message = message; /* unused */
         char* token;
         token = strtok_r(message->topic, "/", &saveptr);
         while ( token != NULL ) {
-            if ( strcmp(token, "tx") == 0 ) {
+            if ( strcmp(token, !bridge_mode ? "tx" : "rx") == 0 ) {
                 char* id_token = strtok_r(NULL, "/", &saveptr);
                 if ( id_token == NULL ) {
                     printf("malformed message topic\n");
@@ -170,7 +181,7 @@ message = message; /* unused */
             }
             token = strtok_r(NULL, "/", &saveptr);
         }
-        if ( strcmp(token, "tx") != 0 ) {
+        if ( strcmp(token, !bridge_mode ? "tx" : "rx") != 0 ) {
             printf("malformed message topic\n");
             return;
         }
@@ -202,8 +213,9 @@ mosq = mosq; /* unused */
 userdata = userdata; /* unused */
     if ( !result ) {
         char topic[2048];
-        strncpy(topic, mqtt_topic_prefix, sizeof(topic));
-        strncat(topic, "/tx/+", sizeof(topic));
+        snprintf(topic, sizeof(topic),
+            !bridge_mode ? "%s/tx/+" : "%s/rx/+", 
+                mqtt_topic_prefix);
         mosquitto_subscribe(mosq, NULL, topic, mqtt_qos);
     }
 }
@@ -290,7 +302,7 @@ int main(int argc, char** argv)
             else {
                 char topic[2048];
                 snprintf(topic, sizeof(topic),
-                    "%s/rx/%x",
+                    !bridge_mode ? "%s/rx/%x" : "%s/tx/%x",
                         mqtt_topic_prefix,
                         frame.can_id & CAN_ERR_MASK);
 
