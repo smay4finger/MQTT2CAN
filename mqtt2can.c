@@ -107,6 +107,18 @@ void parse_options(int argc, char** argv)
     }
 }
 
+void debug_frame(struct can_frame* frame, char* direction)
+{
+    if ( debug > 0 ) {
+        printf("socketcan: %s ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
+            direction,
+            frame->can_id,
+            frame->can_dlc,
+            frame->data[0], frame->data[1], frame->data[2], frame->data[3],
+            frame->data[4], frame->data[5], frame->data[6], frame->data[7]);
+    }
+}
+
 
 void mqtt_log_callback(struct mosquitto* mosq, void* userdata, int level, const char* str)
 {
@@ -151,30 +163,14 @@ message = message; /* unused */
         int message_items = sscanf(message->payload, 
             "%1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx", 
                 &frame.can_dlc, 
-                &frame.data[0],
-                &frame.data[1],
-                &frame.data[2],
-                &frame.data[3],
-                &frame.data[4],
-                &frame.data[5],
-                &frame.data[6],
-                &frame.data[7]);
+                &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
+                &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7]);
         if ( message_items != 9 ) {
             printf("malformed message payload\n");
             return;
         }
 
-        printf("socketcan: TX ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
-            frame.can_id,
-            frame.can_dlc,
-            frame.data[0],
-            frame.data[1],
-            frame.data[2],
-            frame.data[3],
-            frame.data[4],
-            frame.data[5],
-            frame.data[6],
-            frame.data[7]);
+        debug_frame(&frame, "TX");
         if ( write(can_fd, &frame, sizeof(frame)) == -1 ) {
             perror("write on CAN socket failed");
             exit(EXIT_FAILURE);
@@ -270,18 +266,7 @@ int main(int argc, char** argv)
                 perror("read on CAN socket failed");
                 exit(EXIT_FAILURE);
             }
-            
-            printf("socketcan: RX ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
-                frame.can_id,
-                frame.can_dlc,
-                frame.data[0],
-                frame.data[1],
-                frame.data[2],
-                frame.data[3],
-                frame.data[4],
-                frame.data[5],
-                frame.data[6],
-                frame.data[7]);
+            debug_frame(&frame, "RX");
 
             char message[2048];
             snprintf(message, sizeof(message),
