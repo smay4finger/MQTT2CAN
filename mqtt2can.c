@@ -161,8 +161,6 @@ void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct 
 {
 mosq = mosq; /* unused */
 userdata = userdata; /* unused */
-message = message; /* unused */
-
     if ( message->payloadlen ) {
         struct can_frame frame;
 
@@ -209,7 +207,6 @@ message = message; /* unused */
 
 void mqtt_connect_callback(struct mosquitto *mosq, void *userdata, int result)
 {
-mosq = mosq; /* unused */
 userdata = userdata; /* unused */
     if ( !result ) {
         char topic[2048];
