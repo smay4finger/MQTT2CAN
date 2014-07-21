@@ -39,6 +39,9 @@ char* mqtt_topic_prefix = NULL;
 
 int can_fd;
 
+void doublet_add(char* topic, char* payload);
+bool doublet_detected(char* topic, char* payload);
+
 void parse_options(int argc, char** argv)
 {
     int opt;
@@ -140,7 +143,11 @@ void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct 
 mosq = mosq; /* unused */
 userdata = userdata; /* unused */
 
-    printf("huhu %d\n", message->mid);
+    if ( message->payloadlen == 0 )
+        return; // NULL messages are ignored
+
+    if ( doublet_detected(message->topic, message->payload) )
+        return; // doublets are ignored
 
     int items;
 
@@ -153,11 +160,6 @@ userdata = userdata; /* unused */
     items = sscanf(topics[topic_count-1], "%x", &frame.can_id);
     if ( items != 1 ) {
         printf("malformed message topic\n");
-        goto error;
-    }
-
-    if ( message->payloadlen == 0 ) {
-        printf("no message payload\n");
         goto error;
     }
 
@@ -292,6 +294,7 @@ int main(int argc, char** argv)
                             frame.can_dlc);
                 }
 
+                doublet_add(topic, message);
                 mosquitto_publish(mosq, NULL, topic,
                     strlen(message), message,
                     0,
