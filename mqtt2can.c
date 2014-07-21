@@ -34,6 +34,8 @@ int debug = 0;
 char* can_interface = NULL;
 char* broker_hostname = "localhost";
 int broker_port = 1883;
+char* broker_username = NULL;
+char* broker_password = NULL;
 
 char* mqtt_topic_prefix = NULL;
 
@@ -45,7 +47,7 @@ bool doublet_detected(char* topic, char* payload);
 void parse_options(int argc, char** argv)
 {
     int opt;
-    while ( (opt = getopt(argc, argv, "i:h:p:t:q:rBd")) != -1 ) {
+    while ( (opt = getopt(argc, argv, "i:h:p:t:U:P:d")) != -1 ) {
         switch ( opt ) {
         case 'i':
             can_interface = optarg;
@@ -59,15 +61,25 @@ void parse_options(int argc, char** argv)
         case 't':
             mqtt_topic_prefix = optarg;
             break;
+        case 'U':
+            broker_username = optarg;
+            break;
+        case 'P':
+            broker_password = malloc(strlen(optarg));
+            strcpy(broker_password, optarg);
+            while(*optarg) *optarg++ = 'x';
+            break;
         case 'd':
             debug++;
             break;
         default:
             fprintf(stderr,
-                "%s -i [CAN interface] [-h [hostname]] [-p [port]] [-t [topic]]\n"
-                "  -q [QoS]     the QoS of the MQTT messages\n"
-                "  -r           published MQTT messages will be retained by the broker\n"
-                "  -d           debug (use multiple times for more debug messages)\n"
+                "%s -i interface [-h hostname] [-p port] [-t topic]\n"
+                "  -i interface  CAN interface\n"
+                "  -h hostname   MQTT broker host\n"
+                "  -p port       MQTT broker port\n"
+                "  -t topic      MQTT topic prefix (default is can/hostname/interface)\n"
+                "  -d            debug (use multiple times for more debug messages)\n"
                 , argv[0]);
             exit(EXIT_FAILURE);
         }
@@ -237,16 +249,20 @@ int main(int argc, char** argv)
     mosquitto_connect_callback_set(mosq, mqtt_connect_callback);
     mosquitto_message_callback_set(mosq, mqtt_message_callback);
 
+    if ( mosquitto_username_pw_set(mosq, broker_username, broker_password) ) {
+        fprintf(stderr, "mosquitto_username_pw_set failed.\n");
+        exit(EXIT_FAILURE);
+    }
+
     if ( mosquitto_connect_async(mosq, broker_hostname, broker_port, 20 /* keepalive */) ) {
-        perror("Mosquitto connect failed");
+        fprintf(stderr, "mosquitto_connect_async failed.\n");
         exit(EXIT_FAILURE);
     }
 
     if ( mosquitto_loop_start(mosq) ) {
-        perror("Mosquitto loop start failed");
+        fprintf(stderr, "mosquitto_loop_start failed.\n");
         exit(EXIT_FAILURE);
     }
-
 
     /*
      * main loop
