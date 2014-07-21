@@ -36,10 +36,6 @@ char* broker_hostname = "localhost";
 int broker_port = 1883;
 
 char* mqtt_topic_prefix = NULL;
-int mqtt_qos = 0;
-bool mqtt_retain = false;
-
-bool bridge_mode = false;
 
 int can_fd;
 
@@ -60,28 +56,14 @@ void parse_options(int argc, char** argv)
         case 't':
             mqtt_topic_prefix = optarg;
             break;
-        case 'q':
-            mqtt_qos = atoi(optarg);
-            if ( mqtt_qos < 0 || mqtt_qos > 2 ) {
-                fprintf(stderr, "MQTT QoS must be between 0 and 2\n");
-                exit(EXIT_FAILURE);
-            }
-            break;
-        case 'r':
-            mqtt_retain = true;
-            break;
-        case 'B':
-            bridge_mode = true;
-            break;
         case 'd':
             debug++;
             break;
         default:
-            fprintf(stderr, 
+            fprintf(stderr,
                 "%s -i [CAN interface] [-h [hostname]] [-p [port]] [-t [topic]]\n"
                 "  -q [QoS]     the QoS of the MQTT messages\n"
                 "  -r           published MQTT messages will be retained by the broker\n"
-                "  -B           bridge mode (MQTT topic must be set)\n"
                 "  -d           debug (use multiple times for more debug messages)\n"
                 , argv[0]);
             exit(EXIT_FAILURE);
@@ -90,11 +72,6 @@ void parse_options(int argc, char** argv)
 
     if ( can_interface == NULL ) {
         fprintf(stderr, "please specify CAN interface\n");
-        exit(EXIT_FAILURE);
-    }
-
-    if ( bridge_mode && mqtt_topic_prefix == NULL ) {
-        fprintf(stderr, "in bridge mode the MQTT topic is mandatory\n");
         exit(EXIT_FAILURE);
     }
 
@@ -120,28 +97,29 @@ void parse_options(int argc, char** argv)
 
 void debug_frame(struct can_frame* frame, char* direction)
 {
-    if ( debug > 0 ) {
-        if ( !(frame->can_id & CAN_ERR_FLAG) ) {
-            if ( !(frame->can_id & CAN_RTR_FLAG) ) {
-                /* data frame */
-                printf("socketcan: %s ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
-                    direction,
-                    frame->can_id & CAN_ERR_MASK,
-                    frame->can_dlc,
-                    frame->data[0], frame->data[1], frame->data[2], frame->data[3],
-                    frame->data[4], frame->data[5], frame->data[6], frame->data[7]);
-            }
-            else {
-                /* remote request transmission frame */
-                printf("socketcan: %s ID=%X DLC=%d RTR\n",
-                    direction,
-                    frame->can_id & CAN_ERR_MASK,
-                    frame->can_dlc);
-            }
+    if ( debug < 1 )
+        return;
+
+    if ( !(frame->can_id & CAN_ERR_FLAG) ) {
+        if ( (frame->can_id & CAN_RTR_FLAG) == 0 ) {
+            /* data frame */
+            printf("socketcan: %s ID=%X DLC=%d %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                direction,
+                frame->can_id & CAN_ERR_MASK,
+                frame->can_dlc,
+                frame->data[0], frame->data[1], frame->data[2], frame->data[3],
+                frame->data[4], frame->data[5], frame->data[6], frame->data[7]);
         }
         else {
-            /* error frame */
+            /* remote request transmission frame */
+            printf("socketcan: %s ID=%X DLC=%d RTR\n",
+                direction,
+                frame->can_id & CAN_ERR_MASK,
+                frame->can_dlc);
         }
+    }
+    else {
+        /* error frame */
     }
 }
 
@@ -161,48 +139,46 @@ void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct 
 {
 mosq = mosq; /* unused */
 userdata = userdata; /* unused */
-    if ( message->payloadlen ) {
-        struct can_frame frame;
 
-        char* saveptr;
-        char* token;
-        token = strtok_r(message->topic, "/", &saveptr);
-        while ( token != NULL ) {
-            if ( strcmp(token, !bridge_mode ? "tx" : "rx") == 0 ) {
-                char* id_token = strtok_r(NULL, "/", &saveptr);
-                if ( id_token == NULL ) {
-                    printf("malformed message topic\n");
-                    return;
-                }
-                frame.can_id = strtol(id_token, NULL, 16);
-                break;
-            }
-            token = strtok_r(NULL, "/", &saveptr);
-        }
-        if ( strcmp(token, !bridge_mode ? "tx" : "rx") != 0 ) {
-            printf("malformed message topic\n");
-            return;
-        }
+    printf("huhu %d\n", message->mid);
 
-        int message_items = sscanf(message->payload, 
-            "%1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx", 
-                &frame.can_dlc, 
-                &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
-                &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7]);
-        if ( message_items != 9 ) {
-            printf("malformed message payload\n");
-            return;
-        }
+    int items;
 
-        debug_frame(&frame, "TX");
-        if ( write(can_fd, &frame, sizeof(frame)) == -1 ) {
-            perror("write on CAN socket failed");
-            exit(EXIT_FAILURE);
-        }
+    char** topics;
+    int topic_count;
+    mosquitto_sub_topic_tokenise(message->topic, &topics, &topic_count);
+
+    struct can_frame frame;
+
+    items = sscanf(topics[topic_count-1], "%x", &frame.can_id);
+    if ( items != 1 ) {
+        printf("malformed message topic\n");
+        goto error;
     }
-    else {
-        /* null message */
+
+    if ( message->payloadlen == 0 ) {
+        printf("no message payload\n");
+        goto error;
     }
+
+    items = sscanf(message->payload,
+        "%1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx",
+            &frame.can_dlc,
+            &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
+            &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7]);
+    if ( items != 9 ) {
+        printf("malformed message payload\n");
+        goto error;
+    }
+
+    debug_frame(&frame, "TX");
+    if ( write(can_fd, &frame, sizeof(frame)) == -1 ) {
+        perror("write on CAN socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+error:
+    mosquitto_sub_topic_tokens_free(&topics, topic_count); // FIXME error handling!
 }
 
 void mqtt_connect_callback(struct mosquitto *mosq, void *userdata, int result)
@@ -210,10 +186,8 @@ void mqtt_connect_callback(struct mosquitto *mosq, void *userdata, int result)
 userdata = userdata; /* unused */
     if ( !result ) {
         char topic[2048];
-        snprintf(topic, sizeof(topic),
-            !bridge_mode ? "%s/tx/+" : "%s/rx/+", 
-                mqtt_topic_prefix);
-        mosquitto_subscribe(mosq, NULL, topic, mqtt_qos);
+        snprintf(topic, sizeof(topic), "%s/+", mqtt_topic_prefix);
+        mosquitto_subscribe(mosq, NULL, topic, 0);
     }
 }
 
@@ -221,7 +195,7 @@ userdata = userdata; /* unused */
 int main(int argc, char** argv)
 {
     parse_options(argc, argv);
-    
+
     /*
      * opening SocketCAN interface
      */
@@ -298,8 +272,7 @@ int main(int argc, char** argv)
             }
             else {
                 char topic[2048];
-                snprintf(topic, sizeof(topic),
-                    !bridge_mode ? "%s/rx/%x" : "%s/tx/%x",
+                snprintf(topic, sizeof(topic), "%s/%x",
                         mqtt_topic_prefix,
                         frame.can_id & CAN_ERR_MASK);
 
@@ -321,8 +294,8 @@ int main(int argc, char** argv)
 
                 mosquitto_publish(mosq, NULL, topic,
                     strlen(message), message,
-                    mqtt_qos,
-                    mqtt_retain);
+                    0,
+                    false);
             }
         }
     }
