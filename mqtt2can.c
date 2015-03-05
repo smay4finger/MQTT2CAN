@@ -28,6 +28,7 @@
 #include <net/if.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <mosquitto.h>
 
 int debug = 0;
@@ -177,7 +178,7 @@ userdata = userdata; /* unused */
     }
 
     items = sscanf(message->payload,
-        "%1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx",
+        "%*d.%*d %1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx",
             &frame.can_dlc,
             &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
             &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7]);
@@ -284,6 +285,13 @@ int main(int argc, char** argv)
                 perror("read on CAN socket failed");
                 exit(EXIT_FAILURE);
             }
+
+            struct timeval tv;
+            if ( ioctl(can_fd, SIOCGSTAMP, &tv) != 0 ) {
+                perror("ioctl on CAN socket failed");
+                exit(EXIT_FAILURE);
+            }
+
             debug_frame(&frame, "RX");
 
             if ( frame.can_id & CAN_ERR_FLAG ) {
@@ -299,7 +307,9 @@ int main(int argc, char** argv)
                 if ( !(frame.can_id & CAN_RTR_FLAG) ) {
                     /* data frame */
                     snprintf(message, sizeof(message),
-                        "%d %02x%02x%02x%02x%02x%02x%02x%02x",
+                        "%ld.%06ld %d %02x%02x%02x%02x%02x%02x%02x%02x",
+                            tv.tv_sec, 
+                            tv.tv_usec,
                             frame.can_dlc,
                             frame.data[0], frame.data[1], frame.data[2], frame.data[3],
                             frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
