@@ -54,7 +54,7 @@ void parse_options(int argc, char** argv)
         case 'i':
             can_interface = optarg;
             break;
-        case 'b':
+        case 'h':
             broker_hostname = optarg;
             break;
         case 'p':
