@@ -256,8 +256,8 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
-    if ( mosquitto_connect_async(mosq, broker_hostname, broker_port, 20 /* keepalive */) ) {
-        fprintf(stderr, "mosquitto_connect_async failed.\n");
+    if ( mosquitto_connect_bind(mosq, broker_hostname, broker_port, 20 /* keepalive */, NULL) ) {
+        fprintf(stderr, "mosquitto_connect_bind failed.\n");
         exit(EXIT_FAILURE);
     }
 
