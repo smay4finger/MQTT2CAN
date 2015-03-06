@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <string.h>
+#include <ctype.h>
 #include <getopt.h>
 #include <sys/ioctl.h>
 #include <linux/can.h>
@@ -98,6 +99,7 @@ void parse_options(int argc, char** argv)
             perror("failed to get hostname");
             exit(EXIT_FAILURE);
         }
+        for ( char* p = hostname; *p; p++) *p = tolower(*p);
         mqtt_topic_prefix = malloc(strlen("can/") + strlen(hostname) + 1 + strlen(can_interface));
         strcpy(mqtt_topic_prefix, "can/");
         strcat(mqtt_topic_prefix, hostname);
