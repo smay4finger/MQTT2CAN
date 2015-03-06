@@ -51,6 +51,18 @@ int can_fd;
 void doublet_add(char* topic, char* payload);
 bool doublet_detected(char* topic, char* payload);
 
+static void exithelp(char* progname, int exit_status) {
+    fprintf(stderr,
+        "%s -i interface [-h hostname] [-p port] [-t topic]\n"
+        "  -i interface  CAN interface\n"
+        "  -h hostname   MQTT broker host\n"
+        "  -p port       MQTT broker port\n"
+        "  -t topic      MQTT topic prefix (default is can/hostname/interface)\n"
+        "  -d            debug (use multiple times for more debug messages)\n"
+        , progname);
+    exit(exit_status);
+}
+
 void parse_options(int argc, char** argv)
 {
     int opt;
@@ -86,21 +98,13 @@ void parse_options(int argc, char** argv)
             debug++;
             break;
         default:
-            fprintf(stderr,
-                "%s -i interface [-h hostname] [-p port] [-t topic]\n"
-                "  -i interface  CAN interface\n"
-                "  -h hostname   MQTT broker host\n"
-                "  -p port       MQTT broker port\n"
-                "  -t topic      MQTT topic prefix (default is can/hostname/interface)\n"
-                "  -d            debug (use multiple times for more debug messages)\n"
-                , argv[0]);
-            exit(EXIT_FAILURE);
+            exithelp(argv[0], 0);
         }
     }
 
     if ( can_interface == NULL ) {
-        fprintf(stderr, "please specify CAN interface\n");
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "please specify CAN interface\n\n");
+        exithelp(argv[0], 0);
     }
 
     if ( !access_write && !access_read ) {
@@ -192,7 +196,6 @@ userdata = userdata; /* unused */
 
     items = sscanf(topics[topic_count-1], "%x", &frame.can_id);
     if ( items != 1 ) {
-        printf("malformed message topic\n");
         goto error;
     }
 
@@ -202,7 +205,6 @@ userdata = userdata; /* unused */
             &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
             &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7]);
     if ( items != 9 ) {
-        printf("malformed message payload\n");
         goto error;
     }
 
