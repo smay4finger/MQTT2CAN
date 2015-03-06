@@ -5,7 +5,7 @@ INCLUDES=
 LDLIBS=-lmosquitto
 
 
-CFLAGS += -W -Wall -Wstrict-prototypes -O2 $(INCLUDES)
+CFLAGS += -W -Wall -Wstrict-prototypes -Werror -std=c11 -D_GNU_SOURCE -O2 $(INCLUDES)
 
 all: $(TARGET)
 $(TARGET): $(OBJECTS)
