@@ -35,6 +35,10 @@
 int debug = 0;
 
 char* can_interface = NULL;
+
+bool access_read = false;
+bool access_write = false;
+
 char* broker_hostname = "localhost";
 int broker_port = 1883;
 char* broker_username = NULL;
@@ -50,10 +54,16 @@ bool doublet_detected(char* topic, char* payload);
 void parse_options(int argc, char** argv)
 {
     int opt;
-    while ( (opt = getopt(argc, argv, "i:h:p:t:U:P:d")) != -1 ) {
+    while ( (opt = getopt(argc, argv, "i:rwh:p:t:U:P:d")) != -1 ) {
         switch ( opt ) {
         case 'i':
             can_interface = optarg;
+            break;
+        case 'r':
+            access_read = true;
+            break;
+        case 'w':
+            access_write = true;
             break;
         case 'h':
             broker_hostname = optarg;
@@ -91,6 +101,10 @@ void parse_options(int argc, char** argv)
     if ( can_interface == NULL ) {
         fprintf(stderr, "please specify CAN interface\n");
         exit(EXIT_FAILURE);
+    }
+
+    if ( !access_write && !access_read ) {
+        access_read = access_write = true;
     }
 
     if ( mqtt_topic_prefix == NULL ) {
@@ -159,6 +173,9 @@ void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct 
 mosq = mosq; /* unused */
 userdata = userdata; /* unused */
 
+    if ( !access_write )
+        return; // shouldn't happen
+
     if ( message->payloadlen == 0 )
         return; // NULL messages are ignored
 
@@ -205,7 +222,8 @@ userdata = userdata; /* unused */
     if ( !result ) {
         char topic[2048];
         snprintf(topic, sizeof(topic), "%s/+", mqtt_topic_prefix);
-        mosquitto_subscribe(mosq, NULL, topic, 0);
+        if ( access_write ) 
+            mosquitto_subscribe(mosq, NULL, topic, 0);
     }
 }
 
@@ -294,6 +312,9 @@ int main(int argc, char** argv)
                 exit(EXIT_FAILURE);
             }
 
+            if ( !access_read )
+                continue;
+
             debug_frame(&frame, "RX");
 
             if ( frame.can_id & CAN_ERR_FLAG ) {
@@ -323,7 +344,8 @@ int main(int argc, char** argv)
                             frame.can_dlc);
                 }
 
-                doublet_add(topic, message);
+                if ( access_write )
+                    doublet_add(topic, message);
                 mosquitto_publish(mosq, NULL, topic,
                     strlen(message), message,
                     0,
