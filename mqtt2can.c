@@ -55,6 +55,8 @@ static void exithelp(char* progname, int exit_status) {
     fprintf(stderr,
         "%s -i interface [-h hostname] [-p port] [-t topic]\n"
         "  -i interface  CAN interface\n"
+        "  -r            read from CAN\n"
+        "  -w            write to CAN\n"
         "  -h hostname   MQTT broker host\n"
         "  -p port       MQTT broker port\n"
         "  -t topic      MQTT topic prefix (default is can/hostname/interface)\n"
