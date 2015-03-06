@@ -10,5 +10,5 @@ You can bridge a CAN interface to another machine by using the -t option. Here i
 
     sudo modprobe vcan
     sudo ip link add dev vcan0 type vcan
-    sudo ip link vcan0 up
+    sudo ip link set vcan0 up
     mqtt2can -h [broker] -t can/[otherhost]/can0 -i vcan0
