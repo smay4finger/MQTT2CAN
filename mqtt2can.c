@@ -211,6 +211,9 @@ userdata = userdata; /* unused */
     char* origin = NULL;
 
     items = sscanf(topics[topic_count-1], "%x", &frame.can_id);
+    if ( (frame.can_id & ~CAN_SFF_MASK) != 0 ) {
+        frame.can_id |= CAN_EFF_FLAG;
+    }
     if ( items == 1 ) {
         items = sscanf(message->payload,
             "%*d.%*d %1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx %ms",
@@ -227,7 +230,7 @@ userdata = userdata; /* unused */
         }
     }
     free(origin);
-    mosquitto_sub_topic_tokens_free(&topics, topic_count); // FIXME error handling!
+    mosquitto_sub_topic_tokens_free(&topics, topic_count);
 }
 
 void mqtt_connect_callback(struct mosquitto *mosq, void *userdata, int result)
