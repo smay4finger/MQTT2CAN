@@ -228,6 +228,20 @@ userdata = userdata; /* unused */
                 exit(EXIT_FAILURE);
             }
         }
+        else {
+            items = sscanf(message->payload,
+                "%*d.%*d %1hhd RTR %ms",
+                &frame.can_dlc,
+                &origin);
+            if ( items == 2 ) {
+                frame.can_id |= CAN_RTR_FLAG;
+                debug_frame(&frame, "TX");
+                if ( write(can_fd, &frame, sizeof(frame)) == -1 ) {
+                    perror("write on CAN socket failed");
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
     }
     free(origin);
     mosquitto_sub_topic_tokens_free(&topics, topic_count);
