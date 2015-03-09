@@ -215,8 +215,10 @@ userdata = userdata; /* unused */
         frame.can_id |= CAN_EFF_FLAG;
     }
     if ( items == 1 ) {
-        items = sscanf(message->payload,
-            "%*d.%*d %1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx %ms",
+        int remains = 0;
+        sscanf(message->payload, "%*d.%*d %n", &remains);
+        items = sscanf(message->payload + remains,
+            "%1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx %ms",
                 &frame.can_dlc,
                 &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
                 &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7],
