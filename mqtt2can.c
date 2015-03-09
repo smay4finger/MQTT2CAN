@@ -45,11 +45,9 @@ char* broker_username = NULL;
 char* broker_password = NULL;
 
 char* mqtt_topic_prefix = NULL;
+char* here = NULL;
 
 int can_fd;
-
-void doublet_add(char* topic, char* payload);
-bool doublet_detected(char* topic, char* payload);
 
 static void exithelp(char* progname, int exit_status) {
     fprintf(stderr,
@@ -68,7 +66,7 @@ static void exithelp(char* progname, int exit_status) {
 void parse_options(int argc, char** argv)
 {
     int opt;
-    while ( (opt = getopt(argc, argv, "i:rwh:p:t:U:P:d")) != -1 ) {
+    while ( (opt = getopt(argc, argv, "i:rwh:p:t:U:P:u:d")) != -1 ) {
         switch ( opt ) {
         case 'i':
             can_interface = optarg;
@@ -92,9 +90,11 @@ void parse_options(int argc, char** argv)
             broker_username = optarg;
             break;
         case 'P':
-            broker_password = malloc(strlen(optarg));
-            strcpy(broker_password, optarg);
+            broker_password = strdup(optarg);
             while(*optarg) *optarg++ = 'x';
+            break;
+        case 'u':
+            here = optarg;
             break;
         case 'd':
             debug++;
@@ -109,22 +109,38 @@ void parse_options(int argc, char** argv)
         exithelp(argv[0], 0);
     }
 
-    if ( !access_write && !access_read ) {
-        access_read = access_write = true;
+    char hostname[1024];
+    if ( gethostname(hostname, sizeof(hostname)) ) {
+        perror("failed to get hostname");
+        exit(EXIT_FAILURE);
+    }
+    for ( char* p = hostname; *p; p++) *p = tolower(*p);
+
+    if ( here == NULL ) {
+        size_t len = strlen(hostname) + strlen(":") + strlen(can_interface);
+        if ( (here = malloc(len+1)) == NULL ) {
+            perror("failed to allocate memory");
+            exit(EXIT_FAILURE);
+        }
+        strcpy(here, hostname);
+        strcat(here, ":");
+        strcat(here, can_interface);
     }
 
     if ( mqtt_topic_prefix == NULL ) {
-        char hostname[1024];
-        if ( gethostname(hostname, sizeof(hostname)) ) {
-            perror("failed to get hostname");
+        size_t len = strlen("can/") + strlen(hostname) + strlen("/") + strlen(can_interface);
+        if ( (mqtt_topic_prefix = malloc(len+1)) == NULL ) {
+            perror("failed to allocate mqtt_topic_prefix");
             exit(EXIT_FAILURE);
         }
-        for ( char* p = hostname; *p; p++) *p = tolower(*p);
-        mqtt_topic_prefix = malloc(strlen("can/") + strlen(hostname) + 1 + strlen(can_interface));
         strcpy(mqtt_topic_prefix, "can/");
         strcat(mqtt_topic_prefix, hostname);
         strcat(mqtt_topic_prefix, "/");
         strcat(mqtt_topic_prefix, can_interface);
+    }
+
+    if ( !access_write && !access_read ) {
+        access_read = access_write = true;
     }
 
     if ( debug > 2 ) {
@@ -185,9 +201,6 @@ userdata = userdata; /* unused */
     if ( message->payloadlen == 0 )
         return; // NULL messages are ignored
 
-    if ( doublet_detected(message->topic, message->payload) )
-        return; // doublets are ignored
-
     int items;
 
     char** topics;
@@ -195,28 +208,25 @@ userdata = userdata; /* unused */
     mosquitto_sub_topic_tokenise(message->topic, &topics, &topic_count);
 
     struct can_frame frame;
+    char* origin = NULL;
 
     items = sscanf(topics[topic_count-1], "%x", &frame.can_id);
-    if ( items != 1 ) {
-        goto error;
+    if ( items == 1 ) {
+        items = sscanf(message->payload,
+            "%*d.%*d %1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx %ms",
+                &frame.can_dlc,
+                &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
+                &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7],
+                &origin);
+        if ( items == 9 || ( items == 10 && strcmp(origin, here) ) ) {
+            debug_frame(&frame, "TX");
+            if ( write(can_fd, &frame, sizeof(frame)) == -1 ) {
+                perror("write on CAN socket failed");
+                exit(EXIT_FAILURE);
+            }
+        }
     }
-
-    items = sscanf(message->payload,
-        "%*d.%*d %1hhd %2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx",
-            &frame.can_dlc,
-            &frame.data[0], &frame.data[1], &frame.data[2], &frame.data[3],
-            &frame.data[4], &frame.data[5], &frame.data[6], &frame.data[7]);
-    if ( items != 9 ) {
-        goto error;
-    }
-
-    debug_frame(&frame, "TX");
-    if ( write(can_fd, &frame, sizeof(frame)) == -1 ) {
-        perror("write on CAN socket failed");
-        exit(EXIT_FAILURE);
-    }
-
-error:
+    free(origin);
     mosquitto_sub_topic_tokens_free(&topics, topic_count); // FIXME error handling!
 }
 
@@ -331,25 +341,27 @@ int main(int argc, char** argv)
                         frame.can_id & CAN_ERR_MASK);
 
                 char message[2048];
-                if ( !(frame.can_id & CAN_RTR_FLAG) ) {
+                if ( (frame.can_id & CAN_RTR_FLAG) == 0 ) {
                     /* data frame */
                     snprintf(message, sizeof(message),
-                        "%ld.%06ld %d %02x%02x%02x%02x%02x%02x%02x%02x",
+                        "%ld.%06ld %d %02x%02x%02x%02x%02x%02x%02x%02x %s",
                             tv.tv_sec, 
                             tv.tv_usec,
                             frame.can_dlc,
                             frame.data[0], frame.data[1], frame.data[2], frame.data[3],
-                            frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+                            frame.data[4], frame.data[5], frame.data[6], frame.data[7],
+                            here);
                 }
                 else {
                     /* remote transmission request frame */
                     snprintf(message, sizeof(message),
-                        "%d RTR",
-                            frame.can_dlc);
+                        "%ld.%06ld %d RTR %s",
+                            tv.tv_sec,
+                            tv.tv_usec,
+                            frame.can_dlc,
+                            here);
                 }
 
-                if ( access_write )
-                    doublet_add(topic, message);
                 mosquitto_publish(mosq, NULL, topic,
                     strlen(message), message,
                     0,

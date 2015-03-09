@@ -1,5 +1,5 @@
 TARGET=mqtt2can
-OBJECTS=mqtt2can.o doublet_filter.o
+OBJECTS=mqtt2can.o
 
 INCLUDES=
 LDLIBS=-lmosquitto
