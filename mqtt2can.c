@@ -231,8 +231,8 @@ userdata = userdata; /* unused */
             }
         }
         else {
-            items = sscanf(message->payload,
-                "%*d.%*d %1hhd RTR %ms",
+            items = sscanf(message->payload + remains,
+                "%1hhd RTR %ms",
                 &frame.can_dlc,
                 &origin);
             if ( items == 2 ) {
