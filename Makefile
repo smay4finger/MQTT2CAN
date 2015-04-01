@@ -11,5 +11,7 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 clean:
 	$(RM) $(TARGET) $(OBJECTS)
+install: all
+	install --mode 755 mqtt2can $(DESTDIR)/usr/bin/mqtt2can
 
-.PHONY: all clean
+.PHONY: all clean install
