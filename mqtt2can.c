@@ -46,6 +46,7 @@ char* broker_password = NULL;
 
 char* mqtt_topic_prefix = NULL;
 char* here = NULL;
+char* client_id = NULL;
 
 int can_fd;
 
@@ -63,10 +64,54 @@ static void exithelp(char* progname, int exit_status) {
     exit(exit_status);
 }
 
+char* hostname_caninterface_string(void)
+{
+    char hostname[1024];
+    if ( gethostname(hostname, sizeof(hostname)) ) {
+        perror("failed to get hostname");
+        exit(EXIT_FAILURE);
+    }
+    for ( char* p = hostname; *p; p++) *p = tolower(*p);
+
+    char* buffer;
+    size_t len = strlen(hostname) + strlen(":") + strlen(can_interface);
+    if ( (buffer = malloc(len+1)) == NULL ) {
+        perror("failed to allocate memory");
+        exit(EXIT_FAILURE);
+    }
+    strcpy(buffer, hostname);
+    strcat(buffer, ":");
+    strcat(buffer, can_interface);
+    return buffer;
+}
+
+char* mqtt_topic_prefix_string(void)
+{
+    char hostname[1024];
+    if ( gethostname(hostname, sizeof(hostname)) ) {
+        perror("failed to get hostname");
+        exit(EXIT_FAILURE);
+    }
+    for ( char* p = hostname; *p; p++) *p = tolower(*p);
+
+    char* buffer;
+    size_t len = strlen("can/") + strlen(hostname) + strlen("/") + strlen(can_interface);
+    if ( (buffer = malloc(len+1)) == NULL ) {
+        perror("failed to allocate mqtt_topic_prefix");
+        exit(EXIT_FAILURE);
+    }
+    strcpy(buffer, "can/");
+    strcat(buffer, hostname);
+    strcat(buffer, "/");
+    strcat(buffer, can_interface);
+    return buffer;
+}
+
+
 void parse_options(int argc, char** argv)
 {
     int opt;
-    while ( (opt = getopt(argc, argv, "i:rwh:p:t:U:P:u:d")) != -1 ) {
+    while ( (opt = getopt(argc, argv, "i:rwh:p:t:U:P:u:dc:")) != -1 ) {
         switch ( opt ) {
         case 'i':
             can_interface = optarg;
@@ -99,6 +144,9 @@ void parse_options(int argc, char** argv)
         case 'd':
             debug++;
             break;
+        case 'c':
+            client_id = optarg;
+            break;
         default:
             exithelp(argv[0], 0);
         }
@@ -109,34 +157,16 @@ void parse_options(int argc, char** argv)
         exithelp(argv[0], 0);
     }
 
-    char hostname[1024];
-    if ( gethostname(hostname, sizeof(hostname)) ) {
-        perror("failed to get hostname");
-        exit(EXIT_FAILURE);
-    }
-    for ( char* p = hostname; *p; p++) *p = tolower(*p);
-
     if ( here == NULL ) {
-        size_t len = strlen(hostname) + strlen(":") + strlen(can_interface);
-        if ( (here = malloc(len+1)) == NULL ) {
-            perror("failed to allocate memory");
-            exit(EXIT_FAILURE);
-        }
-        strcpy(here, hostname);
-        strcat(here, ":");
-        strcat(here, can_interface);
+        here = hostname_caninterface_string();
+    }
+
+    if ( client_id == NULL ) {
+        client_id = hostname_caninterface_string();
     }
 
     if ( mqtt_topic_prefix == NULL ) {
-        size_t len = strlen("can/") + strlen(hostname) + strlen("/") + strlen(can_interface);
-        if ( (mqtt_topic_prefix = malloc(len+1)) == NULL ) {
-            perror("failed to allocate mqtt_topic_prefix");
-            exit(EXIT_FAILURE);
-        }
-        strcpy(mqtt_topic_prefix, "can/");
-        strcat(mqtt_topic_prefix, hostname);
-        strcat(mqtt_topic_prefix, "/");
-        strcat(mqtt_topic_prefix, can_interface);
+        mqtt_topic_prefix = mqtt_topic_prefix_string();
     }
 
     if ( !access_write && !access_read ) {
@@ -295,7 +325,7 @@ int main(int argc, char** argv)
 
     struct mosquitto* mosq;
     mosquitto_lib_init();
-    if ( (mosq = mosquitto_new(NULL, true, NULL)) == NULL ) {
+    if ( (mosq = mosquitto_new(client_id, true, NULL)) == NULL ) {
         perror("Mosquitto initialization failed");
         exit(EXIT_FAILURE);
     }
