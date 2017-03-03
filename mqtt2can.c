@@ -25,6 +25,8 @@
 #include <getopt.h>
 #include <sys/ioctl.h>
 #include <linux/can.h>
+#include <linux/can/error.h>
+#include <linux/can/raw.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <sys/types.h>
@@ -319,6 +321,14 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
+    can_err_mask_t err_mask = ( CAN_ERR_TX_TIMEOUT | CAN_ERR_CRTL |
+                                CAN_ERR_PROT | CAN_ERR_TRX | CAN_ERR_ACK |
+                                CAN_ERR_BUSOFF | CAN_ERR_BUSERROR | CAN_ERR_RESTARTED );
+    if ( setsockopt(can_fd, SOL_CAN_RAW, CAN_RAW_ERR_FILTER, &err_mask, sizeof(err_mask)) < 0) {
+        perror("failed to set error mask");
+        exit(EXIT_FAILURE);
+    }
+
     /*
      * initialize MQTT
      */
@@ -382,6 +392,25 @@ int main(int argc, char** argv)
 
             if ( frame.can_id & CAN_ERR_FLAG ) {
                 /* error frame */
+                char topic[2048];
+                snprintf(topic, sizeof(topic), "%s/%x",
+                        mqtt_topic_prefix, frame.can_id);
+
+                char message[2048];
+                snprintf(message, sizeof(message),
+                    "%ld.%06ld %d %02x%02x%02x%02x%02x%02x%02x%02x %s",
+                        tv.tv_sec,
+                        tv.tv_usec,
+                        frame.can_dlc,
+                        frame.data[0], frame.data[1], frame.data[2], frame.data[3],
+                        frame.data[4], frame.data[5], frame.data[6], frame.data[7],
+                        here);
+
+                mosquitto_publish(mosq, NULL, topic,
+                    strlen(message), message,
+                    0, 
+                    false);
+
             }
             else {
                 char topic[2048];
