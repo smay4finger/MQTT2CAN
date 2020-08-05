@@ -27,6 +27,7 @@
 #include <linux/can.h>
 #include <linux/can/error.h>
 #include <linux/can/raw.h>
+#include <linux/sockios.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <sys/types.h>
@@ -307,7 +308,7 @@ int main(int argc, char** argv)
     }
 
     struct ifreq ifr;
-    strncpy(ifr.ifr_name, can_interface, sizeof(ifr.ifr_name));
+    strncpy(ifr.ifr_name, can_interface, sizeof(ifr.ifr_name)-1);
     if ( ioctl(can_fd, SIOCGIFINDEX, &ifr) < 0 ) {
         perror("failed to enumerate CAN socket");
         exit(EXIT_FAILURE);
