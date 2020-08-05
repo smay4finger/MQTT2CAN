@@ -1,0 +1,5 @@
+https://wiki.gentoo.org/wiki/Linux_headers_5.2_porting_notes/SIOCGSTAMP
+
+https://github.com/intel/openlldp/pull/27
+
+
